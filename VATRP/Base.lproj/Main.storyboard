@@ -1216,7 +1216,6 @@
                         <outlet property="labelVideoCodec" destination="srE-Fl-cCX" id="KCK-iG-X4C"/>
                         <outlet property="labelVideoDownloadBandwidth" destination="ZiE-wf-GJK" id="G7w-g3-QUa"/>
                         <outlet property="labelVideoUploadBandwidth" destination="sty-SR-Fiw" id="COC-L6-aq6"/>
-                        <outlet property="textFieldMessage" destination="dtw-vN-xFd" id="Jyt-G3-1d4"/>
                         <outlet property="viewSeparateLine" destination="qGY-fJ-AdF" id="hW0-gd-g61"/>
                     </connections>
                 </viewController>

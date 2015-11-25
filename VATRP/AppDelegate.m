@@ -53,7 +53,7 @@
     [[BITHockeyManager sharedHockeyManager].crashManager setAutoSubmitCrashReport: YES];
     [[BITHockeyManager sharedHockeyManager] startManager];
     
-    linphone_core_set_log_level(ORTP_DEBUG);
+    linphone_core_set_log_level(ORTP_ERROR);
     linphone_core_set_log_handler((OrtpLogFunc)linphone_iphone_log_handler);
 }
 
