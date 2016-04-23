@@ -329,8 +329,10 @@ static void chatTable_free_chatrooms(void *data) {
 
 - (void)textComposeEvent:(NSNotification *)notif {
     NSLog(@"*** --> RTT.textComposeEvent called");
-    LinphoneCall* currentCall = [[CallService sharedInstance] getCurrentCall];
-    if (currentCall == nil)
+    LinphoneChatRoom *room = [[[notif userInfo] objectForKey:@"room"] pointerValue];
+    LinphoneCall *call = linphone_chat_room_get_call(room);
+    
+    if (call == nil)
     {
         return; // this event is not for this controller - leave it for sip simple.
     }
@@ -348,14 +350,11 @@ static void chatTable_free_chatrooms(void *data) {
     }
     
     
-    LinphoneChatRoom *room = [[[notif userInfo] objectForKey:@"room"] pointerValue];
     if (room && room == [self getCurrentChatRoom]) {
         //        BOOL composing = linphone_chat_room_is_remote_composing(room);
         //        [self setComposingVisible:composing withDelay:0.3];
     }
-    
-    LinphoneCall *call = linphone_chat_room_get_call(room);
-    
+        
     if (call != NULL) {
         const LinphoneCallParams* current = linphone_call_get_current_params(call);
         
@@ -370,12 +369,17 @@ static void chatTable_free_chatrooms(void *data) {
                 incomingChatMessage = nil;
                 incomingCellView = nil;
             } else {
+                if(rttCode == 8 && !incomingChatMessage) {
+                    return;
+                }
+                
+                BOOL removeMessage = NO;
                 if (incomingChatMessage) {
                     const char *text_char = linphone_chat_message_get_text(incomingChatMessage);
+                    NSString *str_msg = [NSString stringWithUTF8String:text_char];
                     
                     if ((text_char != nil) && strlen(text_char)) {
                         self->messageList = ms_list_remove(self->messageList, incomingChatMessage);
-                        NSString *str_msg = [NSString stringWithUTF8String:text_char];
                         if ([text isEqualToString:@"\b"]) {
                             if (str_msg && str_msg.length > 0) {
                                 str_msg = [str_msg substringToIndex:str_msg.length - 1];
@@ -385,14 +389,26 @@ static void chatTable_free_chatrooms(void *data) {
                         }
                         
                         incomingChatMessage = linphone_chat_room_create_message([self getCurrentChatRoom], [str_msg UTF8String]);
+                        
+                        if (!str_msg || !str_msg.length) {
+                            removeMessage = YES;
+                        }
                     } else {
+                        if (str_msg && !str_msg.length) {
+                            removeMessage = YES;
+                        }
+
                         incomingChatMessage = linphone_chat_room_create_message([self getCurrentChatRoom], [text UTF8String]);
                     }
                 } else {
                     incomingChatMessage = linphone_chat_room_create_message([self getCurrentChatRoom], [text UTF8String]);
                 }
                 
-                self->messageList = ms_list_append(self->messageList, incomingChatMessage);
+                if (removeMessage) {
+                    self->messageList = ms_list_remove(self->messageList, incomingChatMessage);
+                } else {
+                    self->messageList = ms_list_append(self->messageList, incomingChatMessage);
+                }
                 
                 if (incomingCellView) {
                     CGFloat lineCount = [ChatItemTableCellView height:incomingChatMessage width:[self getFrame].size.width];
@@ -404,6 +420,10 @@ static void chatTable_free_chatrooms(void *data) {
                     }
                 } else {
                     [self.tableViewContent reloadData];
+                }
+
+                if (removeMessage) {
+                    incomingChatMessage = nil;
                 }
                 
                 NSInteger count = ms_list_size(messageList);

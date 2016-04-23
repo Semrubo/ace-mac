@@ -29,6 +29,9 @@
 @property (weak) IBOutlet NSTextField *textFieldMailWaitingIndicatorURI;
 @property (weak) IBOutlet NSTextField *textFieldVideoMailUri;
 
+@property (weak) IBOutlet NSTextField *textCardDavServerPath;
+@property (weak) IBOutlet NSTextField *textCardDavRealmName;
+
 @end
 
 @implementation AccountsViewController
@@ -57,6 +60,10 @@
     self.secureTextFieldPassword.enabled = false;
     self.textFieldDomain.enabled = false;
     self.textFieldPort.enabled = false;
+    [self.textFieldMailWaitingIndicatorURI setDelegate:self];
+    [self.textFieldVideoMailUri setDelegate:self];
+    [self.textCardDavServerPath setDelegate:self];
+    [self.textCardDavRealmName setDelegate:self];
     isChanged = NO;
     [self setFields];
 }
@@ -122,6 +129,20 @@
     if([[[[NSUserDefaults standardUserDefaults] dictionaryRepresentation] allKeys] containsObject:VIDEO_MAIL_URI]){
         self.textFieldVideoMailUri.stringValue = [[NSUserDefaults standardUserDefaults] objectForKey:VIDEO_MAIL_URI];
     }
+    
+    if ([[SettingsHandler settingsHandler] getCardDavServerPath]) {
+        self.textCardDavServerPath.stringValue = [[SettingsHandler settingsHandler] getCardDavServerPath];
+    } else {
+        self.textCardDavServerPath.stringValue = @"";
+    }
+    
+    if ([[SettingsHandler settingsHandler] getCardDavRealmName]) {
+        self.textCardDavRealmName.stringValue = [[SettingsHandler settingsHandler] getCardDavRealmName];
+    } else {
+        self.textCardDavRealmName.stringValue = @"";
+    }
+    
+    
 }
 
 - (IBAction)onButtonAutoAnswer:(id)sender {
@@ -145,26 +166,6 @@
     
     [[NSUserDefaults standardUserDefaults] synchronize];
     
-    NSString *transport;
-    if([self.comboBoxTransport.stringValue isEqualToString:@"Encrypted (TLS)"]) {
-        transport=@"TLS";
-    } else {
-        transport=@"TCP";
-    }
-    
-    [[AccountsService sharedInstance] addAccountWithUsername:self.textFieldUsername.stringValue
-                                                      UserID:self.textFieldUserID.stringValue
-                                                    Password:self.secureTextFieldPassword.stringValue
-                                                      Domain:self.textFieldDomain.stringValue
-                                                   Transport:transport
-                                                        Port:self.textFieldPort.intValue
-                                                   isDefault:YES];
-    
-    AccountModel *accountModel_ = [[AccountsService sharedInstance] getDefaultAccount];
-    
-    if (accountModel_) {
-        [[RegistrationService sharedInstance] registerWithAccountModel:accountModel_];
-    }
     
     self.settingsFeedbackText.stringValue = @"Settings saved";
     [[NSNotificationCenter defaultCenter] postNotificationName:@"closeAccountsViewController" object:nil];
@@ -177,7 +178,44 @@
         [[NSUserDefaults standardUserDefaults] setObject:self.textFieldVideoMailUri.stringValue forKey:VIDEO_MAIL_URI];
         [[NSUserDefaults standardUserDefaults] synchronize];
     }
-
+    
+    [[SettingsHandler settingsHandler] setCardDavServerPath:self.textCardDavServerPath.stringValue];
+    [[SettingsHandler settingsHandler] setCardDavRealmName:self.textCardDavRealmName.stringValue];
+    
+    NSString* currentTransportSetting = [[SettingsHandler settingsHandler] getUITransportStringForString:[accountModel transport]];
+    if (![self.comboBoxTransport.stringValue isEqualToString:currentTransportSetting])
+    {
+        // do not try to reregister unless there has been a change that requires a reregister.
+        @try{
+            [[AccountsService sharedInstance] removeAccountWithUsername:accountModel.username];
+        }
+        @catch(NSException *e){
+            NSLog(@"Tried to remove account that does not exist.");
+        }
+        
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        
+        NSString *transport;
+        if([self.comboBoxTransport.stringValue isEqualToString:@"Encrypted (TLS)"]) {
+            transport=@"TLS";
+        } else {
+            transport=@"TCP";
+        }
+        
+        [[AccountsService sharedInstance] addAccountWithUsername:self.textFieldUsername.stringValue
+                                                          UserID:self.textFieldUserID.stringValue
+                                                        Password:self.secureTextFieldPassword.stringValue
+                                                          Domain:self.textFieldDomain.stringValue
+                                                       Transport:transport
+                                                            Port:self.textFieldPort.intValue
+                                                       isDefault:YES];
+        
+        AccountModel *accountModel_ = [[AccountsService sharedInstance] getDefaultAccount];
+        
+        if (accountModel_) {
+            [[RegistrationService sharedInstance] registerWithAccountModel:accountModel_];
+        }
+    }
     return YES;
 }
 
@@ -202,6 +240,16 @@
     }
     
     if ([self.textFieldPort.stringValue isEqual:@""] && !error) {
+        error = YES;
+        errorString = @"Port field is required";
+    }
+    
+    if ([self.textCardDavRealmName.stringValue isEqual:@""] && !error) {
+        error = YES;
+        errorString = @"Port field is required";
+    }
+    
+    if ([self.textCardDavServerPath.stringValue isEqual:@""] && !error) {
         error = YES;
         errorString = @"Port field is required";
     }

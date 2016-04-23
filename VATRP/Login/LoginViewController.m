@@ -96,7 +96,7 @@
         self.textFieldDomain.stringValue = accountModel.domain;
         self.textFieldPort.stringValue = [NSString stringWithFormat:@"%d", accountModel.port];
         
-        self.textFieldDomain.stringValue = [[SettingsHandler settingsHandler] getUITransportString];
+        [self.comboBoxTransport selectItemWithObjectValue:[[SettingsHandler settingsHandler] getUITransportStringForString:loginAccount.transport]];
     }
     
     BOOL shouldAutoLogin = [[NSUserDefaults standardUserDefaults] boolForKey:@"auto_login"];
@@ -110,6 +110,7 @@
         observersAdded = true;
         [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(globalStateChangedNotificationHandler:) name:kLinphoneGlobalStateUpdate object:nil];
     }
+    
 }
 
 -(void)viewWillDisappear:(BOOL)animated
@@ -154,6 +155,10 @@
 
 - (IBAction)onButtonLogin:(id)sender
 {
+    [self.prog_Signin setHidden:NO];
+    [self.prog_Signin startAnimation:self];
+    [self.loginButton setEnabled:NO];
+
     loginClicked = true;
     NSString* userName = [self.textFieldUsername.stringValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     NSString* password = [self.textFieldPassword.stringValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -201,9 +206,6 @@
         [DefaultSettingsManager sharedInstance].delegate = self;
     }
     
-    [self.prog_Signin setHidden:NO];
-    [self.prog_Signin startAnimation:self];
-    [self.loginButton setEnabled:NO];
 }
 
 #pragma mark - connection
@@ -337,12 +339,10 @@
 {
     NSLog(@"Error loading config data");
     [self userLogin];
-    [self.prog_Signin setHidden:YES];
-    [self.prog_Signin stopAnimation:self];
-    [self.loginButton setEnabled:YES];
     [[SettingsHandler settingsHandler] initializeUserDefaults:false settingForNoConfig:true];
     // update the STUN server to match the provider domain
     [[SettingsHandler settingsHandler] setStunServerDomain:self.textFieldDomain.stringValue];
+     linphone_proxy_config_set_expires(linphone_core_get_default_proxy_config([LinphoneManager getLc]), ([DefaultSettingsManager sharedInstance].exparitionTime)?[DefaultSettingsManager sharedInstance].exparitionTime:280);
 }
 
 - (void)userLogin
@@ -415,14 +415,14 @@
   
     
         [[RegistrationService sharedInstance] registerWithUsername:loginAccount.username
-                                                            UserID:@""//loginAccount.userID
+                                                            UserID:loginAccount.userID
                                                           password:loginAccount.password
                                                             domain:loginAccount.domain
                                                          transport:loginAccount.transport
                                                               port:loginAccount.port];
-        [self.prog_Signin setHidden:YES];
-        [self.prog_Signin stopAnimation:self];
-        [self.loginButton setEnabled:NO];
+//        [self.prog_Signin setHidden:YES];
+//        [self.prog_Signin stopAnimation:self];
+//        [self.loginButton setEnabled:NO];
     }
 }
 
@@ -551,6 +551,9 @@
                                                                     Port:loginAccount.port
                                                                isDefault:YES];
             
+            [self.prog_Signin setHidden:YES];
+            [self.prog_Signin stopAnimation:self];
+            [self.loginButton setEnabled:YES];
                 [[AppDelegate sharedInstance] showTabWindow];
                 [[AppDelegate sharedInstance].loginWindowController close];
                 [AppDelegate sharedInstance].loginWindowController = nil;
@@ -704,7 +707,7 @@
     [self.textFieldUsername setEnabled:!state];
     [self.textFieldUserID setEnabled:!state];
     [self.textFieldPassword setEnabled:!state];
-//    [self.textFieldDomain setEnabled:!state];
+    [self.textFieldDomain setEnabled:!state];
 }
 
 #pragma mark - CustomComboBox delegate methods

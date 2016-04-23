@@ -192,17 +192,17 @@
 //    [checkboxEnableVideo setTarget:self];
 //    [self.scrollView.documentView addSubview:checkboxEnableVideo];
     
-    originY -= 30;
-    checkboxEnableRTT = [[NSButton alloc] initWithFrame:NSMakeRect(10, originY, 200, 20)]; // YES
-    [checkboxEnableRTT setButtonType:NSSwitchButton];
-    [checkboxEnableRTT setBezelStyle:0];
-    [checkboxEnableRTT setTitle:@"Enable RTT"];
-    [checkboxEnableRTT setState:[SettingsService getRTTEnabled]];
-    [checkboxEnableRTT setAction:@selector(onCheckBoxHandler:)];
-    [checkboxEnableRTT setTarget:self];
-    [self.scrollView.documentView addSubview:checkboxEnableRTT];
+//    originY -= 30;
+//    checkboxEnableRTT = [[NSButton alloc] initWithFrame:NSMakeRect(10, originY, 200, 20)]; // YES
+//    [checkboxEnableRTT setButtonType:NSSwitchButton];
+//    [checkboxEnableRTT setBezelStyle:0];
+//    [checkboxEnableRTT setTitle:@"Enable RTT"];
+//    [checkboxEnableRTT setState:[SettingsService getRTTEnabled]];
+//    [checkboxEnableRTT setAction:@selector(onCheckBoxHandler:)];
+//    [checkboxEnableRTT setTarget:self];
+//    [self.scrollView.documentView addSubview:checkboxEnableRTT];
     
-    originY -= 25;
+//    originY -= 25;
     NSTextField *labelTitle = [[NSTextField alloc] initWithFrame:NSMakeRect(10, originY, 100, 20)];
     labelTitle.editable = NO;
     labelTitle.stringValue = @"Audio";
@@ -340,7 +340,7 @@
     [checkboxStun setButtonType:NSSwitchButton];
     [checkboxStun setBezelStyle:0];
     [checkboxStun setTitle:@"Use STUN"];
-    [checkboxStun setState:[[NSUserDefaults standardUserDefaults] boolForKey:@"stun_preference"]];
+    [checkboxStun setState:[[NSUserDefaults standardUserDefaults] boolForKey:ENABLE_STUN]];
     [checkboxStun setAction:@selector(onCheckBoxHandler:)];
     [checkboxStun setTarget:self];
     [self.scrollView.documentView addSubview:checkboxStun];
@@ -450,7 +450,7 @@
     [self.scrollView.documentView addSubview:labelTitle];
     
     comboBoxMediaEncription = [[NSComboBox alloc] initWithFrame:NSMakeRect(130, originY, 170, 26)];
-    [comboBoxMediaEncription addItemsWithObjectValues:@[@"Encrypted (SRTP)", @"Encrypted (ZRTP)", @"Encrypted (DTLS)", @"Unencrypted"]];
+    [comboBoxMediaEncription addItemsWithObjectValues:@[@"Encrypted (SRTP)", /*@"Encrypted (ZRTP)", @"Encrypted (DTLS)",*/ @"Unencrypted"]];
     [self.scrollView.documentView addSubview:comboBoxMediaEncription];
     
     LinphoneMediaEncryption menc = linphone_core_get_media_encryption([LinphoneManager getLc]);
@@ -470,15 +470,15 @@
             break;
     }
     
-    originY -= 30;
-    checkboxPushNotifications = [[NSButton alloc] initWithFrame:NSMakeRect(30, originY, 200, 20)]; // NO
-    [checkboxPushNotifications setButtonType:NSSwitchButton];
-    [checkboxPushNotifications setBezelStyle:0];
-    [checkboxPushNotifications setTitle:@"Push Notifications"];
-    [checkboxPushNotifications setState:[[NSUserDefaults standardUserDefaults] boolForKey:@"ACE_PUSH_NOTIFICATIONS"]];
-    [checkboxPushNotifications setAction:@selector(onCheckBoxHandler:)];
-    [checkboxPushNotifications setTarget:self];
-    [self.scrollView.documentView addSubview:checkboxPushNotifications];
+//    originY -= 30;
+//    checkboxPushNotifications = [[NSButton alloc] initWithFrame:NSMakeRect(30, originY, 200, 20)]; // NO
+//    [checkboxPushNotifications setButtonType:NSSwitchButton];
+//    [checkboxPushNotifications setBezelStyle:0];
+//    [checkboxPushNotifications setTitle:@"Push Notifications"];
+//    [checkboxPushNotifications setState:[[NSUserDefaults standardUserDefaults] boolForKey:@"ACE_PUSH_NOTIFICATIONS"]];
+//    [checkboxPushNotifications setAction:@selector(onCheckBoxHandler:)];
+//    [checkboxPushNotifications setTarget:self];
+//    [self.scrollView.documentView addSubview:checkboxPushNotifications];
     
     originY -= 30;
     checkboxIPv6 = [[NSButton alloc] initWithFrame:NSMakeRect(30, originY, 200, 20)]; // YES
@@ -632,7 +632,7 @@
 
     LinphoneCore *lc = [LinphoneManager getLc];
 
-    [[NSUserDefaults standardUserDefaults] setBool:checkboxEnableRTT.state forKey:kREAL_TIME_TEXT_ENABLED];
+//    [[NSUserDefaults standardUserDefaults] setBool:checkboxEnableRTT.state forKey:kREAL_TIME_TEXT_ENABLED];
     
 
     bool enableVideo = true;
@@ -664,19 +664,27 @@
 
     [[NSUserDefaults standardUserDefaults] setObject:textFieldSTUNURL.stringValue forKey:STUN_SERVER_DOMAIN];
 
-    [SettingsService setStun:checkboxStun.state];
-    [SettingsService setICE:checkboxEnableICE.state];
-    [[NSUserDefaults standardUserDefaults] setBool:checkboxEnableICE.state forKey:ENABLE_ICE];
+    [[SettingsHandler settingsHandler] setEnableStun:checkboxStun.state];
+    [[SettingsHandler settingsHandler] setEnableICE:checkboxEnableICE.state];
+    if (checkboxEnableICE.state)
+    {
+        [SettingsService setICE:checkboxEnableICE.state];
+    }
+    else
+    {
+        [SettingsService setStun:checkboxStun.state];
+    }
 
     if (comboBoxMediaEncription.stringValue && [comboBoxMediaEncription.stringValue compare:@"Encrypted (SRTP)"] == NSOrderedSame)
         linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionSRTP);
-    else if (comboBoxMediaEncription.stringValue && [comboBoxMediaEncription.stringValue compare:@"Encrypted (ZRTP)"] == NSOrderedSame)
-        linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionZRTP);
-    else if (comboBoxMediaEncription.stringValue && [comboBoxMediaEncription.stringValue compare:@"Encrypted (DTLS)"] == NSOrderedSame)
-        linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionDTLS);
+//    else if (comboBoxMediaEncription.stringValue && [comboBoxMediaEncription.stringValue compare:@"Encrypted (ZRTP)"] == NSOrderedSame)
+//        linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionZRTP);
+//    else if (comboBoxMediaEncription.stringValue && [comboBoxMediaEncription.stringValue compare:@"Encrypted (DTLS)"] == NSOrderedSame)
+//        linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionDTLS);
     else
         linphone_core_set_media_encryption(lc, LinphoneMediaEncryptionNone);
 
+    [[SettingsHandler settingsHandler] setEnableIPV6:checkboxIPv6.state];
     linphone_core_enable_ipv6(lc, checkboxIPv6.state);
     
     // force the save to sync.

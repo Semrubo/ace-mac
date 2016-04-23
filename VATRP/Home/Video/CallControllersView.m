@@ -36,6 +36,7 @@
 
 @property (weak) IBOutlet NSButton *buttonAnswer;
 @property (weak) IBOutlet NSButton *buttonDecline;
+@property (weak) IBOutlet NSButton *buttonDeclineMessages;
 
 @property (weak) IBOutlet NSButton *buttonHold;
 @property (weak) IBOutlet NSButton *buttonVideo;
@@ -93,6 +94,7 @@ BOOL isRTTLocallyEnabled;
     self.buttonChat.wantsLayer = YES;
     self.buttonAnswer.wantsLayer = YES;
     self.buttonDecline.wantsLayer = YES;
+    self.buttonDeclineMessages.wantsLayer = YES;
     self.rttStatusButton.wantsLayer = YES;
     self.rttStatusButton.enabled = NO;
 
@@ -108,6 +110,7 @@ BOOL isRTTLocallyEnabled;
     [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonAnswer];
     [self.buttonDecline.layer setBackgroundColor:[NSColor redColor].CGColor];
     [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonDecline];
+    [self.buttonDeclineMessages.layer setBackgroundColor:[NSColor redColor].CGColor];
     
     self.view.wantsLayer = YES;
 
@@ -170,9 +173,55 @@ BOOL isRTTLocallyEnabled;
 }
 
 - (IBAction)onButtonVideo:(id)sender {
-    isSendingVideo = !isSendingVideo;
-    videoCurrentlyEnabled = !videoCurrentlyEnabled;
-    [self updateUIForEnableVideo:videoCurrentlyEnabled];
+   
+    const char *currentCamId = (char *)linphone_core_get_video_device([LinphoneManager getLc]);
+    
+    if (strcmp(currentCamId, "StaticImage: Static picture") != 0) {
+        LinphoneCore *lc = [LinphoneManager getLc];
+        LinphoneCall *call = linphone_core_get_current_call(lc);
+        
+        if (call) {
+            const char *newCamId = NULL;
+            newCamId="StaticImage: Static picture";
+            linphone_core_set_video_device([LinphoneManager getLc], newCamId);
+            LinphoneCall *call = linphone_core_get_current_call([LinphoneManager getLc]);
+            if (call != NULL) {
+                // Liz E. - OK - this is currently the way to update for a device change.
+                linphone_core_update_call([LinphoneManager getLc], call, NULL);
+            }
+            
+        } else {
+            NSLog(@"Cannot toggle video button, because no current call");
+        }
+        [self updateUIForEnableVideo:false];
+    }else {
+        
+        LinphoneCore *lc = [LinphoneManager getLc];
+        LinphoneCall *call = linphone_core_get_current_call(lc);
+        
+        if (call) {
+            const char *currentCamId = (char *)linphone_core_get_video_device([LinphoneManager getLc]);
+            const char **cameras = linphone_core_get_video_devices([LinphoneManager getLc]);
+            const char *newCamId = NULL;
+            
+            newCamId=cameras[0];//Todo this should be set to whatever the last camera was before mute, write now its hardcoded to front facing camera
+            
+            
+            if (newCamId) {
+                NSLog(@"Switching from [%s] to [%s]", currentCamId, newCamId);
+                linphone_core_set_video_device([LinphoneManager getLc], newCamId);
+                LinphoneCall *call = linphone_core_get_current_call([LinphoneManager getLc]);
+                if (call != NULL) {
+                    // Liz E. - OK - this is currently the way to update for a device change.
+                    linphone_core_update_call([LinphoneManager getLc], call, NULL);
+                }
+            }
+        } else {
+            NSLog(@"Cannot toggle video button, because no current call");
+        }
+        [self updateUIForEnableVideo:true];
+
+    }
 }
 
 -(void)updateUIForEnableVideo:(bool)enable
@@ -398,6 +447,12 @@ BOOL isRTTLocallyEnabled;
     
 }
 
+- (IBAction)onButtonDeclineMessage:(id)sender {
+    if (_delegate && [_delegate respondsToSelector:@selector(didClickCallControllersViewDeclineMessage:Opened:)]) {
+        [_delegate didClickCallControllersViewDeclineMessage:self Opened:YES];
+    }
+}
+
 - (void)dismisCallInfoWindow {
     if (callInfoWindowController) {
         [callInfoWindowController close];
@@ -439,10 +494,11 @@ BOOL isRTTLocallyEnabled;
     [self callUpdate:call state:linphone_call_get_state(call)];
 
     self.buttonAnswer.hidden = NO;
-    self.buttonDecline.frame = CGRectMake(self.view.frame.size.width - self.buttonDecline.frame.size.width - 85,
-                                          self.buttonDecline.frame.origin.y,
-                                          self.buttonDecline.frame.size.width,
-                                          self.buttonDecline.frame.size.height);
+    
+    [self setDeclineButtonFrame:CGRectMake(self.view.frame.size.width - self.buttonDecline.frame.size.width - 85,
+                                           self.buttonDecline.frame.origin.y,
+                                           self.buttonDecline.frame.size.width,
+                                           self.buttonDecline.frame.size.height)];
     [self.buttonDecline setTitle:@"Decline"];
     [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonDecline];
     [self enableDisableButtons:NO];
@@ -452,10 +508,11 @@ BOOL isRTTLocallyEnabled;
     call = acall;
     
     self.buttonAnswer.hidden = YES;
-    self.buttonDecline.frame = CGRectMake((self.view.frame.size.width - self.buttonDecline.frame.size.width)/2,
-                                          self.buttonDecline.frame.origin.y,
-                                          self.buttonDecline.frame.size.width,
-                                          self.buttonDecline.frame.size.height);
+    [self setDeclineButtonFrame:CGRectMake((self.view.frame.size.width - self.buttonDecline.frame.size.width)/2,
+                                           self.buttonDecline.frame.origin.y,
+                                           self.buttonDecline.frame.size.width,
+                                           self.buttonDecline.frame.size.height)];
+     
     [self.buttonDecline setTitle:@"Cancel"];
 //    [self.buttonDecline setHidden:false];
     [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonDecline];
@@ -490,6 +547,8 @@ BOOL isRTTLocallyEnabled;
     [self.buttonAnswer setKeyEquivalent:@""];
     switch (astate) {
         case LinphoneCallIncomingReceived: {
+            self.buttonDeclineMessages.hidden = NO;
+
             [self setControllersToDefaultState];
             
             self.labelCallState.hidden = NO;
@@ -500,16 +559,18 @@ BOOL isRTTLocallyEnabled;
             break;
         }
         case LinphoneCallConnected: {
+            self.buttonDeclineMessages.hidden = YES;
+            
             self.buttonAnswer.hidden = YES;
             self.labelCallState.hidden = YES;
             self.labelCallState.stringValue = @"Connected";
 
             [self.buttonDecline setTitle:@"End Call"];
             [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonDecline];
-            self.buttonDecline.frame = CGRectMake((self.view.frame.size.width - self.buttonDecline.frame.size.width) / 2,
-                                                  self.buttonDecline.frame.origin.y,
-                                                  self.buttonDecline.frame.size.width,
-                                                  self.buttonDecline.frame.size.height);
+            [self setDeclineButtonFrame:CGRectMake((self.view.frame.size.width - self.buttonDecline.frame.size.width) / 2,
+                                                   self.buttonDecline.frame.origin.y,
+                                                   self.buttonDecline.frame.size.width,
+                                                   self.buttonDecline.frame.size.height)];
             
             if ([SettingsService getMicMute]) {
                 [self onButtonMute:self.buttonMute];
@@ -566,9 +627,11 @@ BOOL isRTTLocallyEnabled;
             break;
         }
         case LinphoneCallError: {
+            self.buttonDeclineMessages.hidden = YES;
             break;
         }
         case LinphoneCallEnd: {
+            self.buttonDeclineMessages.hidden = YES;
             self.labelCallState.stringValue = @"Call End";
             videoCurrentlyEnabled = YES;
             isSendingVideo = YES;
@@ -596,9 +659,7 @@ BOOL isRTTLocallyEnabled;
         callAppData->videoRequested =
         TRUE; /* will be used later to notify user if video was not activated because of the linphone core*/
         //linphone_call_enable_camera(call, TRUE);
-        LinphoneInfoMessage *linphoneInfoMessage = linphone_core_create_info_message(lc);
-        linphone_info_message_add_header(linphoneInfoMessage, "action", "camera_mute_on");
-        linphone_call_send_info_message(call, linphoneInfoMessage);
+
     } else {
         NSString* linphoneVersion = [NSString stringWithUTF8String:linphone_core_get_version()];
         NSLog(@"Cannot toggle video button, because no current call. LinphoneVersion: %@", linphoneVersion);
@@ -612,16 +673,7 @@ BOOL isRTTLocallyEnabled;
 //        return;
     
     if (call) {
-        // ToDo VATRP-842: Setting a static image, but until the static image is working in linphone we are currently seeing a black image.
-        //    The choice is this or a no webcam image. For testing, using no webcam image.
-//        NSString *pathToImageString = [[NSBundle mainBundle] pathForResource:@"contacts" ofType:@"png"];
-//        const char *pathToImage = [pathToImageString UTF8String];
-//        linphone_core_set_static_picture(lc, pathToImage);
-        //linphone_call_enable_camera(call, FALSE);
-        LinphoneInfoMessage *linphoneInfoMessage = linphone_core_create_info_message(lc);
-        linphone_info_message_add_header(linphoneInfoMessage, "action", "camera_mute_off");
-        linphone_call_send_info_message(call, linphoneInfoMessage);
-//        linphone_core_enable_video(call, FALSE);
+     
     } else {
         NSString* linphoneVersion = [NSString stringWithUTF8String:linphone_core_get_version()];
         NSLog(@"Cannot toggle video button, because no current call. LinphoneVersion: %@", linphoneVersion);
@@ -673,6 +725,15 @@ BOOL isRTTLocallyEnabled;
 
     [self.buttonSpeaker setImage:[NSImage imageNamed:@"speaker_active"]];
     [self.buttonSpeaker.layer setBackgroundColor:[NSColor colorWithRed:92.0/255.0 green:117.0/255.0 blue:132.0/255.0 alpha:0.8].CGColor];
+}
+
+- (void) setDeclineButtonFrame:(NSRect)frame {
+    self.buttonDecline.frame = frame;
+    self.buttonDeclineMessages.frame = NSMakeRect(frame.origin.x + frame.size.width + 2, frame.origin.y, self.buttonDeclineMessages.frame.size.width, frame.size.height);
+}
+
+- (NSButton*)getDeclineMessagesButton {
+    return self.buttonDeclineMessages;
 }
 
 #pragma mark settings handler selectors

@@ -7,6 +7,7 @@
 //
 
 #import "ChatViewController.h"
+#import "ContactPictureManager.h"
 #import "ChatContactTableCellView.h"
 #import "ChatItemTableCellView.h"
 #import "BackgroundedView.h"
@@ -53,6 +54,7 @@
 @property (unsafe_unretained) IBOutlet NSTextView *textViewIncoming;
 @property (weak) IBOutlet NSScrollView *scrollViewOutgoing;
 @property (unsafe_unretained) IBOutlet NSTextView *textViewOutgoing;
+@property (weak) IBOutlet NSButton *buttonCall;
 
 
 - (IBAction)onButtonNewChat:(id)sender;
@@ -102,6 +104,14 @@
                                                  selector:@selector(didReceiveMessage:)
                                                      name:kCHAT_RECEIVE_MESSAGE
                                                    object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(contactInfoFillDone:)
+                                                     name:@"contactInfoFilled"
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(contactEditDone:)
+                                                     name:@"contactInfoEditDone"
+                                                   object:nil];
         observersAdded = true;
     }
     
@@ -116,7 +126,7 @@
     BackgroundedView *backgroundedView = (BackgroundedView*)self.view;
     [backgroundedView setBackgroundColor:[NSColor colorWithRed:221.0/255.0 green:221.0/255.0 blue:221.0/255.0 alpha:1.0]];
     contacts = nil;
-    selectedChatRoom = nil;
+    [self setCharRoom:nil];
     selectedContactCell = nil;
     incomingChatMessage = nil;
     outgoingChatMessage = nil;
@@ -154,7 +164,7 @@
             [alert setMessageText:@"Invalid address. Please specify the entire SIP address for the chat"];
             [alert runModal];
         } else {
-            selectedChatRoom = linphone_core_get_chat_room(lc, addr);
+            [self setCharRoom:linphone_core_get_chat_room(lc, addr)];
         }
         
         if (selectedChatRoom) {
@@ -315,7 +325,7 @@ static void chatTable_free_chatrooms(void *data) {
     
     [self.tableViewContacts deselectAll:nil];
     if (selectedContactCell) [selectedContactCell.layer setBackgroundColor:[NSColor clearColor].CGColor];
-    selectedChatRoom = NULL;
+    [self setCharRoom:nil];
     [self updateContentData];
     
     [self selectNewMessage];
@@ -324,6 +334,41 @@ static void chatTable_free_chatrooms(void *data) {
     [self.tableViewContent reloadData];
     
     [self.tableViewContacts scrollRowToVisible:0];
+}
+
+- (IBAction)onButtonSend:(id)sender {
+    [self eventENTER];
+}
+
+- (IBAction)onButtonCall:(id)sender {
+    if (selectedChatRoom) {
+        const LinphoneAddress *addr = linphone_chat_room_get_peer_address(selectedChatRoom);
+        
+        NSString *address = nil;
+        if (addr != NULL) {
+            BOOL useLinphoneAddress = true;
+            // contact name
+            if (useLinphoneAddress) {
+                const char *lDisplayName = linphone_address_get_display_name(addr);
+                const char *lUserName = linphone_address_get_username(addr);
+                if (lDisplayName)
+                    address = [NSString stringWithUTF8String:lDisplayName];
+                else if (lUserName)
+                    address = [NSString stringWithUTF8String:lUserName];
+            }
+        }
+        
+        if (address != nil) {
+            // Go to dialer view
+            [CallService callTo:address];
+        }
+    }
+}
+
+- (void) setCharRoom:(LinphoneChatRoom*)room {
+    selectedChatRoom = room;
+    
+    self.buttonCall.enabled = selectedChatRoom ? YES :NO;
 }
 
 #if defined __MAC_10_9 || defined __MAC_10_8
@@ -338,6 +383,8 @@ static void chatTable_free_chatrooms(void *data) {
             ChatContactTableCellView *cellView = [tableView makeViewWithIdentifier:@"Contact" owner:self];
             
             if (stateNewMessage && row == 0) {
+                [cellView.textFieldUnredMessageCount setHidden:YES];
+                
                 cellView.textField.stringValue = @"New Message";
                 cellView.textFieldInitials.stringValue = @"N";
                 cellView.textFieldLastMessage.stringValue = @"";
@@ -373,13 +420,44 @@ static void chatTable_free_chatrooms(void *data) {
                 displayName = [NSString stringWithUTF8String:username ?: address];
                 ms_free(address);
             }
+
+            LinphoneFriendList *friendList = linphone_core_get_default_friend_list([LinphoneManager getLc]);
+            LinphoneFriend *linphoneFriend = linphone_friend_list_find_friend_by_address(friendList, linphoneAddress);
             
+            if (linphoneFriend) {
+                const char *name = linphone_friend_get_name(linphoneFriend);
+                displayName = [NSString stringWithUTF8String:name];
+                
+                const char *friendName = linphone_friend_get_name(linphoneFriend);
+                const char *addressString = linphone_address_as_string_uri_only(linphoneAddress);
+
+                NSImage *contactImage = [[NSImage alloc]initWithContentsOfFile:
+                                         [[ContactPictureManager sharedInstance] imagePathByName:[NSString stringWithUTF8String:friendName]
+                                                                                       andSipURI:[NSString stringWithUTF8String:addressString]]];
+                if (contactImage) {
+                    [cellView.imageView setImage:contactImage];
+                } else {
+                    [cellView.imageView setImage:[NSImage imageNamed:@"male"]];
+                }
+                
+                cellView.imageView.hidden = NO;
+                [cellView.imageView setWantsLayer:YES];
+                cellView.imageView.layer.cornerRadius = cellView.imageView.frame.size.height/2.0;
+                cellView.imageView.layer.masksToBounds = YES;
+
+                cellView.textFieldInitials.hidden = YES;
+            } else {
+                cellView.textFieldInitials.stringValue = [[displayName substringToIndex:1] uppercaseString];
+                cellView.textFieldInitials.layer.cornerRadius = cellView.textFieldInitials.frame.size.height/2;
+                [cellView.textFieldInitials setDrawsBackground:YES];
+                [cellView.textFieldInitials setBackgroundColor:[NSColor clearColor]];
+                [cellView.textFieldInitials wantsUpdateLayer];
+                
+                cellView.imageView.hidden = YES;
+                cellView.textFieldInitials.hidden = NO;
+            }
+
             cellView.textField.stringValue = displayName;
-            cellView.textFieldInitials.stringValue = [[displayName substringToIndex:1] uppercaseString];
-            cellView.textFieldInitials.layer.cornerRadius = cellView.textFieldInitials.frame.size.height/2;
-            [cellView.textFieldInitials setDrawsBackground:YES];
-            [cellView.textFieldInitials setBackgroundColor:[NSColor clearColor]];
-            [cellView.textFieldInitials wantsUpdateLayer];
             
             if (selectedChatRoom && selectedChatRoom == chatRoom) {
                 if (selectedContactCell) {
@@ -395,7 +473,14 @@ static void chatTable_free_chatrooms(void *data) {
             
             if (last_message) {
                 const char *text = linphone_chat_message_get_text(last_message);
-                [cellView.textFieldLastMessage setStringValue:[NSString stringWithUTF8String:text]];
+                NSString *lastMessageStr = [NSString stringWithUTF8String:text];
+                
+                if ([lastMessageStr hasPrefix:CALL_DECLINE_PREFIX]) {
+                    lastMessageStr = [lastMessageStr substringFromIndex:CALL_DECLINE_PREFIX.length];
+                    lastMessageStr = [@"Call declined with message: " stringByAppendingString:lastMessageStr];
+                }
+
+                [cellView.textFieldLastMessage setStringValue:lastMessageStr];
                 
 //                time_t new = linphone_chat_message_get_time(last_message);
                 
@@ -477,7 +562,8 @@ static void chatTable_free_chatrooms(void *data) {
         [selectedCell.layer setBackgroundColor:[NSColor colorWithDeviceRed:43.0/255.0 green:146.0/255.0 blue:245.0/255.0 alpha:1.0].CGColor];
         selectedContactCell = selectedCell;
         
-        selectedChatRoom = (LinphoneChatRoom *)ms_list_nth_data(contacts, (int)index);
+        [self setCharRoom:(LinphoneChatRoom *)ms_list_nth_data(contacts, (int)index)];
+
         if (selectedChatRoom != nil)
         {
             linphone_chat_room_mark_as_read(selectedChatRoom);
@@ -556,17 +642,6 @@ static void chatTable_free_chatrooms(void *data) {
     //        [self.tableViewContacts reloadData];
     //        [self.tableViewContent reloadData];
     //    }
-}
-
-- (IBAction)onButtonSend:(id)sender {
-    if (selectedChatRoom != NULL) {
-//        LinphoneCore *lc = [LinphoneManager getLc];
-//        const LinphoneAddress *addr = linphone_chat_room_get_peer_address(selectedChatRoom);
-//        LinphoneCallParams *lcallParams = linphone_core_create_default_call_parameters(lc);
-//        linphone_call_params_enable_audio(lcallParams, false);
-//        linphone_call_params_enable_realtime_text(lcallParams, true);
-//        currentCall = linphone_core_invite_address_with_params(lc, addr, lcallParams);
-    }
 }
 
 #pragma mark - Event Functions
@@ -667,13 +742,22 @@ static void chatTable_free_chatrooms(void *data) {
     }
 }
 
+- (void)contactInfoFillDone:(NSNotification*)notif {
+    [self.tableViewContacts reloadData];
+}
+    
+- (void)contactEditDone:(NSNotification*)notif {
+    [self.tableViewContacts reloadData];
+}
+
 - (void)textReceivedEvent:(NSNotification *)notif {
     NSLog(@"*** --> ChatViewController.textRecievedEvent called");
 
     LinphoneAddress *from = [[[notif userInfo] objectForKey:@"from_address"] pointerValue];
     LinphoneChatRoom *room = [[notif.userInfo objectForKey:@"room"] pointerValue];
     LinphoneChatMessage *chat = [[notif.userInfo objectForKey:@"message"] pointerValue];
-    
+    const char *text = linphone_chat_message_get_text(chat);
+
     if (from == NULL || chat == NULL) {
         return;
     }
@@ -699,6 +783,8 @@ static void chatTable_free_chatrooms(void *data) {
         }
         
         ms_free(cr_from_string);
+    } else {
+        [self loadData];
     }
     
     ms_free(fromStr);
@@ -837,8 +923,8 @@ static void chatTable_free_chatrooms(void *data) {
                 [alert setMessageText:@"Invalid address. Please specify the entire SIP address for the chat"];
                 [alert runModal];
             } else {
-                selectedChatRoom = linphone_core_get_chat_room(lc, addr);
-                
+                [self setCharRoom:linphone_core_get_chat_room(lc, addr)];
+
                 if (!selectedChatRoom) {
                     NSAlert *alert = [[NSAlert alloc] init];
                     [alert addButtonWithTitle:@"OK"];
@@ -948,7 +1034,7 @@ static void message_status(LinphoneChatMessage *msg, LinphoneChatMessageState st
 
 - (void) selectNewMessage {
     stateNewMessage = YES;
-    selectedChatRoom = NULL;
+    [self setCharRoom:nil];
     [self updateContentData];
     
     [self.textFieldNoRecipient setHidden:NO];

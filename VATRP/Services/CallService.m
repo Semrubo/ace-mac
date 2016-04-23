@@ -21,6 +21,9 @@
     
     bool screenSaverIsRunning;
     bool screenIsLocked;
+    
+    NSString *declinedMessage;
+    NSString *lastCalledUsername;
 }
 
 + (int) callsCount;
@@ -45,6 +48,8 @@
     self = [super init];
     
     if (self) {
+        declinedMessage = nil;
+
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(callUpdate:)
                                                      name:kLinphoneCallUpdate
@@ -175,12 +180,15 @@
 }
     
 - (int) decline:(LinphoneCall *)aCall {
+    [self close];
+    [[[AppDelegate sharedInstance].homeWindowController getHomeViewController].videoView setCall:nil];
     return linphone_core_terminate_call([LinphoneManager getLc], aCall);
 }
 
-- (void) accept:(LinphoneCall *)aCall {
+- (bool) accept:(LinphoneCall *)aCall {
     //linphone_core_enable_self_view([LinphoneManager getLc], [SettingsHandler.settingsHandler isShowSelfViewEnabled]);
-    [[LinphoneManager instance] acceptCall:aCall];
+    return [[LinphoneManager instance] acceptCall:aCall];
+    
 }
 
 - (void) pause:(LinphoneCall*)aCall {
@@ -198,6 +206,10 @@
 
 - (LinphoneCall*) getCurrentCall {
     return currentCall;
+}
+
+- (NSString*) getLastCalledUsername {
+    return lastCalledUsername;
 }
 
 - (void)callUpdate:(NSNotification*)notif {
@@ -315,17 +327,21 @@
             // - there is an issue here. As of 2-9-2016 if we can enable mic when there is more than one call there is a crash -
             //    linphone is making the settings on each call without checking to see if the audio stream in null. So for now we need
             //    a notion of whether or not this is the first call on the line
-            if ([CallService callsCount] < 2)
+            int callCount = [CallService callsCount];
+            if (callCount == 1)
             {
-                SettingsHandler* settingsHandler = [SettingsHandler settingsHandler];
-                bool microphoneMuted = [settingsHandler isMicrophoneMuted];
-                linphone_core_enable_mic(lc, !microphoneMuted);
-                bool speakerMuted = [settingsHandler isSpeakerMuted];
-                [LinphoneManager.instance muteSpeakerInCall:speakerMuted];
+                if ([[LinphoneAPI instance] callAppearsValid:aCall])
+                {
+                    SettingsHandler* settingsHandler = [SettingsHandler settingsHandler];
+                    bool microphoneMuted = [settingsHandler isMicrophoneMuted];
+                    linphone_core_enable_mic(lc, !microphoneMuted);
+                    bool speakerMuted = [settingsHandler isSpeakerMuted];
+                    [LinphoneManager.instance muteSpeakerInCall:speakerMuted];
 //                bool micIsEnabled = linphone_core_mic_enabled(lc);
-                linphone_core_set_play_level(lc, 100);
+                    linphone_core_set_play_level(lc, 100);
+                }
             }
-            else
+            else if (callCount > 1)
             {
                 if (callToSwapTo != nil)
                 {
@@ -341,21 +357,28 @@
                     currentCall = aCall;
                 }
             }
-            int playLevel = linphone_core_get_play_level(lc);
-            int playbackGain = linphone_core_get_playback_gain_db(lc);
-            NSLog([NSString stringWithFormat:@"   play level IS %d, playback gain is %d ********************************", playLevel, playbackGain ]);
-            const char *speakerString = linphone_core_get_playback_device([LinphoneManager getLc]);
+            if ([[LinphoneAPI instance] callAppearsValid:aCall])
+            {
+                int playLevel = linphone_core_get_play_level(lc);
+                int playbackGain = linphone_core_get_playback_gain_db(lc);
+                NSLog([NSString stringWithFormat:@"   play level IS %d, playback gain is %d ********************************", playLevel, playbackGain ]);
+                const char *speakerString = linphone_core_get_playback_device([LinphoneManager getLc]);
 //            const char *microphoneString = linphone_core_get_playback_device([LinphoneManager getLc]);
 //            NSString *speaker = [[NSString alloc] initWithUTF8String:speakerString];
 //            NSLog([NSString stringWithFormat:@"SPEAKER IS %@", speaker ]);
-            bool speakerCanPlayback = linphone_core_sound_device_can_playback(lc, speakerString);
-            if (speakerCanPlayback)
-            {
-                NSLog(@"    speaker can playback");
+                bool speakerCanPlayback = linphone_core_sound_device_can_playback(lc, speakerString);
+                if (speakerCanPlayback)
+                {
+                    NSLog(@"    speaker can playback");
+                }
+                else
+                {
+                    NSLog(@"    speaker can NOT playback");
+                }
             }
             else
             {
-                NSLog(@"    speaker can NOT playback");
+                NSLog(@"CallService.callUpdate: Trying to update audio settings for streams running but call does not appear ot be valid.");
             }
             break;
         }
@@ -399,7 +422,8 @@
                 [[[AppDelegate sharedInstance].homeWindowController getHomeViewController].videoView hideSecondIncomingCallView];
             } else {
                 [[ChatService sharedInstance] closeChatWindow];
-                [self performSelector:@selector(closeCallWindow) withObject:nil afterDelay:1.0];
+                NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:YES], @"fromEvents", nil];
+                [self performSelector:@selector(closeCallWindow:) withObject:dict afterDelay:5.0];
             }
             
             [[ChatService sharedInstance] closeChatWindow];
@@ -412,9 +436,15 @@
             }
             
             [[ChatService sharedInstance] closeChatWindow];
+
+            const LinphoneAddress* call_addr = linphone_call_get_remote_address(currentCall);
+            const char *call_username = linphone_address_get_username(call_addr);
+            lastCalledUsername = [NSString stringWithUTF8String:call_username];
+            
             currentCall = NULL;
 
-            [self performSelector:@selector(closeCallWindow) withObject:nil afterDelay:1.0];
+            NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:YES], @"fromEvents", nil];
+            [self performSelector:@selector(closeCallWindow:) withObject:dict afterDelay:5.0];
 
             const MSList *call_list = linphone_core_get_calls(lc);
             if (call_list) {
@@ -599,7 +629,6 @@
     if (callIDFromPush && autoAnswer){
         // accept call automatically
         [lm acceptCall:call];
-        
     } else {
         [[ViewManager sharedInstance].rttView updateViewForDisplay];
         [self openCallWindow];
@@ -631,21 +660,41 @@
     }
 }
 
-- (void) closeCallWindow {
+- (void) closeCallWindow:(NSDictionary*)dict {
     LinphoneCore *lc = [LinphoneManager getLc];
+    BOOL fromEvents = [[dict objectForKey:@"fromEvents"] boolValue];
 
     if (!linphone_core_get_calls(lc)) {
-        NSWindow *window = [AppDelegate sharedInstance].homeWindowController.window;
-        
-        if ([[AppDelegate sharedInstance].homeWindowController getHomeViewController].isAppFullScreen) {
-            [window toggleFullScreen:self];
-            [window setStyleMask:[window styleMask] & ~NSResizableWindowMask]; // non-resizable
+        if (!fromEvents) {
+            [self close];
+        } else {
+            if (declinedMessage) {
+                NSDictionary *dict = [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:NO], @"fromEvents", nil];
+                [self performSelector:@selector(closeCallWindow:) withObject:dict afterDelay:1.0];
+            } else {
+                [self close];
+            }
         }
-        
-        [window setFrame:NSMakeRect(window.frame.origin.x, window.frame.origin.y, 310, window.frame.size.height)
-                 display:YES
-                 animate:YES];
     }
+}
+
+- (void) close {
+    declinedMessage = nil;
+
+    NSWindow *window = [AppDelegate sharedInstance].homeWindowController.window;
+    
+    if ([[AppDelegate sharedInstance].homeWindowController getHomeViewController].isAppFullScreen) {
+        [window toggleFullScreen:self];
+        [window setStyleMask:[window styleMask] & ~NSResizableWindowMask]; // non-resizable
+    }
+    
+    [window setFrame:NSMakeRect(window.frame.origin.x, window.frame.origin.y, 310, window.frame.size.height)
+             display:YES
+             animate:YES];
+}
+
+- (void) closeCallWindow {
+    [self close];
 }
 
 + (int) callsCount {
@@ -653,6 +702,12 @@
     int call_count = ms_list_size(call_list);
     
     return call_count;
+}
+
+- (void)setDeclineMessage:(NSString*)declineMsg {
+    declinedMessage = declineMsg;
+
+    [[[AppDelegate sharedInstance].homeWindowController getHomeViewController].videoView setDeclineMessage:declineMsg];
 }
 
 @end

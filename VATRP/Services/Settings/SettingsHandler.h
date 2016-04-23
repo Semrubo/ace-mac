@@ -89,9 +89,13 @@
 - (int)getQoSSignalingValue;
 - (int)getQoSAudioValue;
 - (int)getQoSVideoValue;
+- (NSString*)getCardDavServerPath;
+- (NSString*)getCardDavRealmName;
 
 -(void)storeEnabledCodecs;
 - (void)setStunServerDomain:(NSString*)stunServerDomain;
+-(void)setCardDavServerPath:(NSString*)serverPath;
+-(void)setCardDavRealmName:(NSString*)realmName;
 
 #pragma mark settings accessors
 // these settings are set when the UI calls one of the methods above.
@@ -134,6 +138,9 @@
 -(bool)getEnableIPV6;
 -(bool)getEnableICE;
 -(NSString*)setStunServerDomain;
+-(void)setEnableStun:(bool)enable;
+-(void)setEnableICE:(bool)enable;
+-(void)setEnableIPV6:(bool)enable;
 
 -(NSString*) getUITransportStringForString:(NSString*)stringToCompare;
 -(NSString*) getUITransportString;

@@ -12,6 +12,7 @@
 #import "KeypadWindowController.h"
 #import "ChatWindowController.h"
 #import "CallControllersView.h"
+#import "CallDeclineMessagesView.h"
 #import "NumpadView.h"
 #import "SecondIncomingCallView.h"
 #import "SecondCallView.h"
@@ -27,7 +28,7 @@
 #import "SettingsHandler.h"
 #import "LinphoneAPI.h"
 
-@interface VideoView () <CallControllersViewDelegate> {
+@interface VideoView () <CallControllersViewDelegate, NSAnimationDelegate> {
     NSTimer *timerCallDuration;
     NSTimer *timerRingCount;
     
@@ -35,6 +36,7 @@
     
     NSString *windowTitle, *address;
 
+    CallDeclineMessagesView *callDeclineMessagesView;
     NumpadView *numpadView;
     NSImageView *cameraStatusModeImageView;
     BackgroundedView *blackCurtain;
@@ -42,11 +44,18 @@
     bool uiInitialized;
     bool observersAdded;
     bool displayErrorLock;
+    
+    NSViewAnimation *fadeOut;
+    NSViewAnimation *fadeIn;
+    NSDictionary *callErrorStatuses;
 }
 
 @property (weak) IBOutlet NSTextField *labelDisplayName;
 @property (weak) IBOutlet NSTextField *labelCallState;
 @property (weak) IBOutlet NSTextField *labelCallDuration;
+@property (weak) IBOutlet NSTextField *labelCallDeclineMessage;
+@property (weak) IBOutlet NSView *viewCallDeclineMessage;
+
 
 @property (weak) IBOutlet BackgroundedView *callControllsConteinerView;
 
@@ -73,6 +82,9 @@
 @property (strong, nonatomic)IBOutlet NSImageView *holdImageView;
 
 @property (weak) IBOutlet NSImageView *imageViewQuality;
+
+@property (weak) IBOutlet NSImageView *imageViewEncription;
+
 - (void) inCallTick:(NSTimer*)timer;
 
 @end
@@ -129,6 +141,9 @@
     self.callControllsConteinerView.wantsLayer = YES;
     [self.callControllsConteinerView setBackgroundColor:[NSColor clearColor]];
     
+    
+    callDeclineMessagesView = [[CallDeclineMessagesView alloc] initWithNibName:@"CallDeclineMessagesView" bundle:nil];
+    callDeclineMessagesView.delegate = self;
     [Utils setButtonTitleColor:[NSColor whiteColor] Button:self.buttonFullScreen];
     
     
@@ -161,6 +176,10 @@
         [self addObservers];
          observersAdded = true;
     }
+    
+    NSString *FileDB = [[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:@"ResasonErrors.plist"];
+    callErrorStatuses = [NSDictionary dictionaryWithContentsOfFile:FileDB];
+    
 }
 
 -(void) addObservers
@@ -224,6 +243,8 @@
     switch (astate) {
             //    LinphoneCallIncomingReceived, /**<This is a new incoming call */
         case LinphoneCallIncomingReceived: {
+            self.imageViewEncription.image = nil;
+            self.viewCallDeclineMessage.hidden = YES;
             self.labelCallState.stringValue = @"Incoming Call 00:00";
             [self startRingCountTimerWithTimeInterval:3.75];
             [self.labelRingCount setTextColor:[NSColor whiteColor]];
@@ -251,15 +272,6 @@
             
             [[AppDelegate sharedInstance].viewController showVideoMailWindow];
             
-//            if ([[SettingsHandler settingsHandler] isShowSelfViewEnabled]) {
-//                self.localVideo.hidden = NO;
-//                linphone_core_use_preview_window(lc, YES);
-//                linphone_core_set_native_preview_window_id(lc, (__bridge void *)(self.localVideo));
-//                linphone_core_enable_self_view(lc, true);
-//            } else {
-                self.localVideo.hidden = YES;
-//            }
-            
             timerCallDuration = [NSTimer scheduledTimerWithTimeInterval:0.3
                                                                  target:self
                                                                selector:@selector(inCallTick:)
@@ -279,10 +291,13 @@
             
             [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(hideAllCallControllers) object:nil];
             [self performSelector:@selector(hideAllCallControllers) withObject:nil afterDelay:3.0];
+            [self showVideoPreview];
         }
             break;
             //    LinphoneCallOutgoingInit, /**<An outgoing call is started */
         case LinphoneCallOutgoingInit: {
+            self.imageViewEncription.image = nil;
+            self.viewCallDeclineMessage.hidden = YES;
             self.labelCallState.stringValue = @"Calling 00:00";
             [self.callControllsConteinerView setHidden:NO];
             [[[AppDelegate sharedInstance].homeWindowController getHomeViewController] reloadRecents];
@@ -290,7 +305,7 @@
             break;
             //    LinphoneCallOutgoingRinging, /**<An outgoing call is ringing at remote end */
         case LinphoneCallOutgoingRinging: {
-            
+            self.imageViewEncription.image = nil;
             self.labelCallState.stringValue = @"Ringing 00:00";
             [self startRingCountTimerWithTimeInterval:3.6];
             [self.labelRingCount setTextColor:[NSColor redColor]];
@@ -298,6 +313,7 @@
             break;
             //    LinphoneCallPaused, /**< The call is paused, remote end has accepted the pause */
         case LinphoneCallPaused: {
+            self.imageViewEncription.image = nil;
             int call_Duration = linphone_call_get_duration(acall);
             NSString *string_time = [Utils getTimeStringFromSeconds:call_Duration];
             self.labelCallState.stringValue = [NSString stringWithFormat:@"On Hold %@",string_time];
@@ -335,11 +351,14 @@
                 [self.callControllersView performChatButtonClick];
             }
 
+            [self setEncriptionStatusForCall:acall];
             break;
         }
             //    LinphoneCallError, /**<The call encountered an error*/
         case LinphoneCallError:
         {
+            [callDeclineMessagesView dismissController:self];
+            
             [self stopRingCountTimer];
             [self stopCallFlashingAnimation];
             [self displayCallError:acall message:@"Call Error"];
@@ -356,6 +375,9 @@
             //    LinphoneCallEnd, /**<The call ended normally*/
         case LinphoneCallEnd:
         {
+            self.imageViewEncription.image = nil;
+            [callDeclineMessagesView dismissController:self];
+
             if ((call != nil) && linphone_call_get_dir(call) == LinphoneCallOutgoing) {
                 [self displayCallError:call message:@"Call Error"];
             }
@@ -431,13 +453,36 @@
     }
 }
 
+- (void)setEncriptionStatusForCall:(LinphoneCall*)acall {
+    const LinphoneCallParams* current = linphone_call_get_current_params(acall);
+    LinphoneMediaEncryption enc = linphone_call_params_get_media_encryption(current);
+    NSString *str = [self encryptionToString:enc];
+    if ([str isEqualToString:@"Encryption type None"]) {
+        self.imageViewEncription.image = [NSImage imageNamed:@"security_ko"];
+    } else {
+        self.imageViewEncription.image = [NSImage imageNamed:@"security_ok"];
+    }
+}
+
+- (NSString *)encryptionToString:(LinphoneMediaEncryption)state {
+    switch (state) {
+        case LinphoneMediaEncryptionNone:
+            return @"Encryption type None";
+            break;
+        case LinphoneMediaEncryptionDTLS:
+            return @"Encryption type DTLS";
+            break;
+        case LinphoneMediaEncryptionSRTP:
+            return @"Encryption type SRTP";
+            break;
+        case LinphoneMediaEncryptionZRTP:
+            return @"Encryption type ZRTP";
+            break;
+    }
+}
+
 - (void)displayCallError:(LinphoneCall *)call_ message:(NSString *)message
 {
-    if (displayErrorLock)
-    {
-        return;
-    }
-    displayErrorLock = true;
     NSString *lMessage;
     NSString *lTitle;
     const LinphoneAddress *linphoneAddress;
@@ -463,95 +508,16 @@
                                      @"SIP account configuration in the settings.",
                                      nil);
     } else {
-        lMessage = [NSString stringWithFormat:NSLocalizedString(@"Cannot call %@.", nil), lUserName];
-    }
-    if (call_ != nil) {
+        LinphoneReason reason = linphone_call_get_reason(call_);
+        NSDictionary *dict = [callErrorStatuses objectForKey:[Utils callStateStringByIndex:[NSNumber numberWithInt:reason]]];
         
-        switch (linphone_call_get_reason(call_)) {
-            case LinphoneReasonNone:
-                // then there was no error - we are getting this on call ending - do not show an error
-                return;
-                break;
-            case LinphoneReasonNotFound:
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ is not registered.", nil), lUserName];
-                break;
-            case LinphoneReasonBusy:
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ is busy.", nil), lUserName];
-                break;
-            case LinphoneReasonDeclined:
-                lMessage = NSLocalizedString(@"The user is not available", nil);
-                break;
-            case LinphoneReasonNoResponse: /**<No response received from remote*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"No response from client.", nil), lUserName];
-                break;
-            case LinphoneReasonForbidden: /**<Authentication failed due to bad credentials or resource forbidden*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Authentication failed.", nil), lUserName];
-                break;
-            case LinphoneReasonNotAnswered: /**<The call was not answered in time (request timeout)*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ timed out.", nil), lUserName];
-                break;
-            case LinphoneReasonUnsupportedContent: /**<Unsupported content */
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ call content is unsupported.", nil), lUserName];
-                break;
-            case LinphoneReasonIOError: /**<Transport error: connection failures, disconnections etc...*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"There was a transport error during call setup or connection.", nil), lUserName];
-                break;
-            case LinphoneReasonDoNotDisturb: /**<Do not disturb reason*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ asked not to be disturbed.", nil), lUserName];
-                break;
-            case LinphoneReasonUnauthorized: /**<Operation is unauthorized because missing credential*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Credntials were not provided.", nil), lUserName];
-                break;
-            case LinphoneReasonNotAcceptable: /**<Operation like call update rejected by peer*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Operation was rejected by peer.", nil), lUserName];
-                break;
-            case LinphoneReasonNoMatch: /**<Operation could not be executed by server or remote client because it didn't have any context for it*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"No match for operation.", nil), lUserName];
-                break;
-            case LinphoneReasonMovedPermanently: /**<Resource moved permanently*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ has moved permanently.", nil), lUserName];
-                break;
-            case LinphoneReasonGone: /**<Resource no longer exists*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ no longer exists.", nil), lUserName];
-                break;
-            case LinphoneReasonTemporarilyUnavailable: /**<Temporarily unavailable*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@ is temporarily unavailable.", nil), lUserName];
-                break;
-            case LinphoneReasonAddressIncomplete: /**<Address incomplete*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Call address is incomplete.", nil), lUserName];
-                break;
-            case LinphoneReasonNotImplemented: /**<Not implemented*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Request is not implemented.", nil), lUserName];
-                break;
-            case LinphoneReasonBadGateway: /**<Bad gateway*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Bad gateway.", nil), lUserName];
-                break;
-            case LinphoneReasonServerTimeout: /**<Server timeout*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Server timeout.", nil), lUserName];
-                break;
-            case LinphoneReasonUnknown: /**Unknown reason*/
-                lMessage = [NSString stringWithFormat:NSLocalizedString(@"Reason unknown.", nil), lUserName];
-                break;
-            default:
-                if (message != nil) {
-                    lMessage = [NSString stringWithFormat:NSLocalizedString(@"%@\nReason was: %@", nil), lMessage, self.callStatusMessage];
-                }
-                break;
+        if (![[dict objectForKey:@"code"] isEqualToString:@""]) {
+            lMessage = [[[[dict objectForKey:@"message"] stringByAppendingString:@"(sip: "] stringByAppendingString:[dict objectForKey:@"code"]] stringByAppendingString:@")"];
+        } else {
+            lMessage = [dict objectForKey:@"message"];
         }
-    } else {
-        lMessage = [NSString stringWithFormat:NSLocalizedString(@"Call information unavailable.", nil)];
     }
-    
-    lTitle = NSLocalizedString(@"Call failed", nil);
-    
-    NSAlert *alert = [[NSAlert alloc] init];
-    [alert addButtonWithTitle:@"OK"];
-    [alert setMessageText:lTitle];
-    [alert setInformativeText:lMessage];
-    [alert setAlertStyle:NSWarningAlertStyle];
-    
-    [alert runModal];
-    displayErrorLock = false;
+    self.labelCallState.stringValue = lMessage;
 }
 
 - (void)dismiss {
@@ -614,20 +580,53 @@
     numpadView.hidden = !numpadView.hidden;
 }
 
+- (void) didClickCallControllersViewDeclineMessage:(CallControllersView*)callControllersView_ Opened:(BOOL)open {
+    if (open) {
+        [self presentViewController:callDeclineMessagesView
+            asPopoverRelativeToRect:NSMakeRect(0,//[callControllersView_ getDeclineMessagesButton].frame.size.width,
+                                               0, 100, 100)
+                             ofView:[callControllersView_ getDeclineMessagesButton]
+#if defined __MAC_10_9 || defined __MAC_10_8
+                      preferredEdge:NSRectEdgeMinY
+#else
+                      preferredEdge:NSRectEdgeMinX
+#endif
+                           behavior:NSPopoverBehaviorApplicationDefined];
+
+        
+//        [self presentViewControllerAsModalWindow:callDeclineMessagesView];
+    } else {
+        
+    }
+}
+
+#pragma mark - CallDeclineMessagesView Delegate
+
+- (void) didClickCallDeclineMessagesViewItem:(CallDeclineMessagesView*)callDeclineMessagesView_ Message:(NSString*)message {
+    message = [@"@@info@@ " stringByAppendingString:message];
+
+    LinphoneChatRoom *room = linphone_call_get_chat_room(call);
+    LinphoneChatMessage *msg = linphone_chat_room_create_message(room, [message UTF8String]);
+    linphone_chat_room_send_message2(room, msg, nil, nil);
+    
+    [[CallService sharedInstance] decline:call];
+}
 
 #pragma mark - Property Functions
 
 - (void)setCall:(LinphoneCall*)acall {
-    call = acall;
-    
-    if (call) {
-        [self update];
-        [self.callControllersView setCall:call];
-    }
-    if (call == nil)
-    {
-        // invalidate the timer if there is no current call
-        [self stopInCallTimer];
+    @synchronized (self) {
+        call = acall;
+        
+        if (call) {
+            [self update];
+            [self.callControllersView setCall:call];
+        }
+        if (call == nil)
+        {
+            // invalidate the timer if there is no current call
+            [self stopInCallTimer];
+        }
     }
 }
 
@@ -688,43 +687,45 @@
 }
 
 - (void) inCallTick:(NSTimer*)timer {
-    if (call) {
-        int call_Duration = linphone_call_get_duration(call);
-        NSString *string_time = [Utils getTimeStringFromSeconds:call_Duration];
-        self.holdImageView.hidden = YES;
-        LinphoneCallState call_state = linphone_call_get_state(call);
-        
-        switch (call_state) {
-            case LinphoneCallConnected:
-            case LinphoneCallStreamsRunning:
-            {
-                self.labelCallState.stringValue = [NSString stringWithFormat:@"Connected %@", string_time];
+    @synchronized (self) {
+        if (call) {
+            int call_Duration = linphone_call_get_duration(call);
+            NSString *string_time = [Utils getTimeStringFromSeconds:call_Duration];
+            self.holdImageView.hidden = YES;
+            LinphoneCallState call_state = linphone_call_get_state(call);
+            
+            switch (call_state) {
+                case LinphoneCallConnected:
+                case LinphoneCallStreamsRunning:
+                {
+                    self.labelCallState.stringValue = [NSString stringWithFormat:@"Connected %@", string_time];
+                }
+                    break;
+                case LinphoneCallPaused:
+                case LinphoneCallPausedByRemote:
+                {
+                    self.labelCallState.stringValue = [NSString stringWithFormat:@"On Hold %@", string_time];
+                    self.holdImageView.hidden = NO;
+                }
+                    break;
+                    
+                default:
+                    break;
             }
-                break;
-            case LinphoneCallPaused:
-            case LinphoneCallPausedByRemote:
-            {
-                self.labelCallState.stringValue = [NSString stringWithFormat:@"On Hold %@", string_time];
-                self.holdImageView.hidden = NO;
+            
+            int quality = (int)linphone_call_get_current_quality(call);
+            
+            switch (quality) {
+                case 0:
+                case 1:
+                case 2: {
+                    self.imageViewQuality.image = [NSImage imageNamed:[NSString stringWithFormat:@"call_quality_indicator_%d", quality]];
+                }
+                    break;
+                default:
+                    self.imageViewQuality.image = [NSImage imageNamed:@"call_quality_indicator_3"];
+                    break;
             }
-                break;
-                
-            default:
-                break;
-        }
-        
-        int quality = (int)linphone_call_get_current_quality(call);
-        
-        switch (quality) {
-            case 0:
-            case 1:
-            case 2: {
-                self.imageViewQuality.image = [NSImage imageNamed:[NSString stringWithFormat:@"call_quality_indicator_%d", quality]];
-            }
-                break;
-            default:
-                self.imageViewQuality.image = [NSImage imageNamed:@"call_quality_indicator_3"];
-                break;
         }
     }
 }
@@ -781,6 +782,27 @@
     [layer removeAllAnimations];
 }
 
+- (void) startCallDeclineMessageAnimation {
+    
+    NSView *content = self.viewCallDeclineMessage;
+    CALayer *layer = [content layer];
+    
+    CABasicAnimation *anime = [CABasicAnimation animationWithKeyPath:@"backgroundColor"];
+    anime.fromValue = (id)[layer backgroundColor];
+    anime.toValue = (id)CFBridgingRelease(CGColorCreateGenericRGB(1.0, 0.1, 0.1, 1.0));
+    anime.duration = 0.5f;
+    anime.autoreverses = YES;
+    anime.repeatCount = 10;
+    
+    [layer addAnimation:anime forKey:@"backgroundColor"];
+}
+
+- (void) stopDeclineMessageAnimation {
+    NSView *content = self.labelCallDeclineMessage;
+    CALayer *layer = [content layer];
+    [layer removeAllAnimations];
+}
+
 - (void)setMouseInCallWindow {
     if(!call) return;
     
@@ -806,11 +828,13 @@
 }
 
 - (void) hideAllCallControllers {
-    [self.callControllsConteinerView setHidden:YES];
+    if (self.viewCallDeclineMessage.hidden) {
+        [self.callControllsConteinerView setHidden:YES];
+    }
 }
 
 - (void)showVideoPreview {
-    bool previewEnabled = [[SettingsHandler settingsHandler] isShowPreviewEnabled];
+    bool previewEnabled = [[SettingsHandler settingsHandler] isShowSelfViewEnabled];
     if (call == nil)
     {
         [[LinphoneAPI instance] linphoneShowSelfPreview:previewEnabled];
@@ -821,6 +845,7 @@
         linphone_core_set_video_device(lc, cam);
         linphone_core_enable_video_preview([LinphoneManager getLc], TRUE);
         linphone_core_use_preview_window(lc, YES);
+        self.localVideo.hidden = NO;
         linphone_core_set_native_preview_window_id(lc, (__bridge void *)(self.localVideo));
         linphone_core_enable_self_view([LinphoneManager getLc], TRUE);
      } else {
@@ -917,7 +942,8 @@
     [[self.labelDisplayName animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.labelDisplayName.frame.size.width/2, callViewFrame.size.height - 101, self.labelDisplayName.frame.size.width, self.labelDisplayName.frame.size.height)];
     [[self.labelCallState animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.labelCallState.frame.size.width/2, callViewFrame.size.height - 146, self.labelCallState.frame.size.width, self.labelCallState.frame.size.height)];
     [[self.labelCallDuration animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.labelCallDuration.frame.size.width/2, callViewFrame.size.height - 170, self.labelCallDuration.frame.size.width, self.labelCallDuration.frame.size.height)];
-    [[self.labelRingCount animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.labelCallDuration.frame.size.width/2, callViewFrame.size.height/2 - self.labelCallDuration.frame.size.height/2, self.labelRingCount.frame.size.width, self.labelRingCount.frame.size.height)];
+    [[self.viewCallDeclineMessage animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.viewCallDeclineMessage.frame.size.width/2, callViewFrame.size.height/2 - self.viewCallDeclineMessage.frame.size.height/2 - 140, self.viewCallDeclineMessage.frame.size.width, self.viewCallDeclineMessage.frame.size.height)];
+    [[self.labelRingCount animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.labelRingCount.frame.size.width/2, callViewFrame.size.height/2 - self.labelRingCount.frame.size.height/2, self.labelRingCount.frame.size.width, self.labelRingCount.frame.size.height)];
     [[self.callControllersView.view animator] setFrame:NSMakeRect(callViewFrame.size.width/2 - self.callControllersView.view.frame.size.width/2, 12, self.callControllersView.view.frame.size.width, self.callControllersView.view.frame.size.height)];
     [[self.secondIncomingCallView.view animator] setFrame:NSMakeRect(0, 0, callViewFrame.size.width, callViewFrame.size.height)];
     [self.secondIncomingCallView reorderControllersForFrame:NSMakeRect(0, 0, callViewFrame.size.width, callViewFrame.size.height)];
@@ -932,6 +958,11 @@
         [cameraStatusModeImageView setImage:[NSImage imageNamed:@"camera_mute.png"]];
         [blackCurtain addSubview:cameraStatusModeImageView];
         [self.view addSubview:blackCurtain];
+        [self.view addSubview:self.callControllsConteinerView positioned:NSWindowAbove relativeTo:nil];
+        [self.view addSubview:self.imageViewEncription positioned:NSWindowAbove relativeTo:nil];
+        if (!self.localVideo.hidden) {
+            [self.view addSubview:self.localVideo positioned:NSWindowAbove relativeTo:nil];
+        }
     }
     if ([videoMode isEqualToString:@"isCameraMuted"] || [videoMode isEqualToString:@"camera_mute_on"]) {
         [blackCurtain removeFromSuperview];
@@ -939,6 +970,7 @@
 }
 
 #pragma mark Settings delegates
+
 -(void)showSelfViewFromSettings:(bool)show
 {
     linphone_core_enable_self_view([LinphoneManager getLc], show);
@@ -948,6 +980,27 @@
 // to cancel an out going call
 - (IBAction)onHangUp:(NSButton *)sender
 {
+}
+
+- (void)setDeclineMessage:(NSString*)declineMsg {
+    [self startCallDeclineMessageAnimation];
+    
+    [self.callControllsConteinerView setHidden:NO];
+    self.viewCallDeclineMessage.hidden = NO;
+    self.labelCallState.stringValue = @"Call declined";
+    self.labelCallDeclineMessage.stringValue = declineMsg;
+}
+
+- (void)mouseDown:(NSEvent *)theEvent {
+    NSLog(@"mouseDown");
+    
+    if (!self.viewCallDeclineMessage.hidden) {
+        self.viewCallDeclineMessage.hidden = YES;
+    }
+    
+    if (!call) {
+        [[CallService sharedInstance] closeCallWindow];
+    }
 }
 
 @end

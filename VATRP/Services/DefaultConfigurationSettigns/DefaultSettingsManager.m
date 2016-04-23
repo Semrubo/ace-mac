@@ -9,6 +9,7 @@
 #import "DefaultSettingsManager.h"
 #import "SRVResolver.h"
 #import "SettingsConstants.h"
+#import "Utils.h"
 
 @interface DefaultSettingsManager () <SRVResolverDelegate, NSURLConnectionDelegate>
 //{
@@ -59,7 +60,8 @@ static DefaultSettingsManager *sharedInstance = nil;
 
 - (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
     NSDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:data options:kNilOptions error:nil];
-    [self storeToUserDefaults:jsonDict];
+    NSDictionary* normalizedDict = [Utils normalizeServerDictionary:jsonDict];
+    [self storeToUserDefaults:normalizedDict];
     //[aiv stopAnimating];
     if ([self.delegate respondsToSelector:@selector(didFinishLoadingConfigData)]) {
         [self.delegate didFinishLoadingConfigData];
@@ -70,7 +72,8 @@ static DefaultSettingsManager *sharedInstance = nil;
     NSString *filePath = [[NSBundle mainBundle] pathForResource:@"config_defaults" ofType:@"json"];
     NSData *content = [[NSData alloc] initWithContentsOfFile:filePath];
     NSDictionary *jsonDict = [NSJSONSerialization JSONObjectWithData:content options:kNilOptions error:nil];
-    [self storeToUserDefaults:jsonDict];
+    NSDictionary* normalizedDict = [Utils normalizeServerDictionary:jsonDict];
+    [self storeToUserDefaults:normalizedDict];
 }
 
 - (void)parseDefaultConfigSettings:(NSString*)configAddress withUsername:(NSString*)userName andPassword:(NSString*)password {
@@ -88,6 +91,7 @@ static DefaultSettingsManager *sharedInstance = nil;
 }
 
 // ToDo: Liz E., Post GA - fix the rest of the settings constants.
+// Ensure that all dictionaries passed to this method have been passed through the [Utils normalizeServerDictionary method.
 - (void)storeToUserDefaults:(NSDictionary*)dict {
     
     [[NSUserDefaults standardUserDefaults] setObject:[dict objectForKey:@"version"] forKey:@"version"];
@@ -118,7 +122,7 @@ static DefaultSettingsManager *sharedInstance = nil;
     
     [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_rtt"] != [NSNull null])?[dict objectForKey:@"enable_rtt"]:@"" forKey:@"kREAL_TIME_TEXT_ENABLED"];
     
-    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_adaptive_rate"] != [NSNull null])?[dict objectForKey:@"enable_adaptive_rate"]:@"" forKey:@"enable_adaptive_rate_control"];
+//TEMP for VATRP-3512    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_adaptive_rate"] != [NSNull null])?[dict objectForKey:@"enable_adaptive_rate"]:@"" forKey:@"enable_adaptive_rate_control"];
     
     [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enabled_codecs"] != [NSNull null])?[dict objectForKey:@"enabled_codecs"]:@[@"H.264", @"H.263", @"VP8", @"G.722", @"G.711"] forKey:@"enabled_codecs"];
 //    NSArray* test = [[NSUserDefaults standardUserDefaults] objectForKey:@"enabled_codecs"];
@@ -129,11 +133,11 @@ static DefaultSettingsManager *sharedInstance = nil;
     
     [[NSUserDefaults standardUserDefaults] setInteger:([dict objectForKey:DOWNLOAD_BANDWIDTH] != [NSNull null])?[[dict objectForKey:DOWNLOAD_BANDWIDTH] integerValue]:1500 forKey:DOWNLOAD_BANDWIDTH ];
     
-    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_stun"] != [NSNull null])?[dict objectForKey:@"enable_stun"]:@"true" forKey:@"stun_preference"];
+    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_stun"] != [NSNull null])?[dict objectForKey:@"enable_stun"]:@"true" forKey:ENABLE_STUN];
     
     [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"stun_server"] != [NSNull null])?[dict objectForKey:@"stun_server"]:@"" forKey:STUN_SERVER_DOMAIN];
 
-    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_ice"] != [NSNull null])? [dict objectForKey:@"enable_ice"]:@"true" forKey:ENABLE_ICE];
+    [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"enable_ice"] != [NSNull null])? [dict objectForKey:@"enable_ice"]:@"false" forKey:ENABLE_ICE];
     
     [[NSUserDefaults standardUserDefaults] setObject:([dict objectForKey:@"logging"] != [NSNull null])? [dict objectForKey:@"logging"]:@"" forKey:@"logging"];
     
@@ -291,14 +295,14 @@ static DefaultSettingsManager *sharedInstance = nil;
 }
 
 - (BOOL)enableStun {
-    return [[NSUserDefaults standardUserDefaults] boolForKey:@"enable_stun"];
+    return [[NSUserDefaults standardUserDefaults] boolForKey:ENABLE_STUN];
 }
 
 - (NSString*)stunServer {
     return [[NSUserDefaults standardUserDefaults] stringForKey:STUN_SERVER_DOMAIN];
 }
 
-- (BOOL)enableIce {
+- (BOOL)enableIce {    
     return [[NSUserDefaults standardUserDefaults] boolForKey:ENABLE_ICE];
 }
 

@@ -142,7 +142,7 @@
     }
     if (force || [[NSUserDefaults standardUserDefaults]objectForKey:@"enable_adaptive_rate_control"] == nil)
     {
-        [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:@"enable_adaptive_rate_control"];
+        [[NSUserDefaults standardUserDefaults] setObject:@"false" forKey:@"enable_adaptive_rate_control"];
     }
     if (force || [[NSUserDefaults standardUserDefaults]objectForKey:@"enabled_codecs"] == nil)
     {
@@ -163,17 +163,13 @@
     {
         [self setUserSettingInt:DOWNLOAD_BANDWIDTH withValue:0];
     }
-    if ((force || settingForNoConfig) || [[NSUserDefaults standardUserDefaults]objectForKey:@"stun_preference"] == nil)
+    if ((force || settingForNoConfig) || [[NSUserDefaults standardUserDefaults]objectForKey:ENABLE_STUN] == nil)
     {
-        [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:@"stun_preference"];
+        [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:ENABLE_STUN];
     }
     if (force || [[NSUserDefaults standardUserDefaults]objectForKey:STUN_SERVER_DOMAIN] == nil)
     {
         [[NSUserDefaults standardUserDefaults] setObject:@"" forKey:STUN_SERVER_DOMAIN];
-    }
-    if ((force || settingForNoConfig) || [[NSUserDefaults standardUserDefaults]objectForKey:ENABLE_ICE] == nil)
-    {
-        [[NSUserDefaults standardUserDefaults] setObject:@"true" forKey:ENABLE_ICE];
     }
     if (force || [[NSUserDefaults standardUserDefaults]objectForKey:@"logging"] == nil)
     {
@@ -433,10 +429,43 @@
 {
     [self setUserSettingString:STUN_SERVER_DOMAIN withValue:stunServerDomain];
 }
--(NSString*)setStunServerDomain
+-(NSString*)getStunServerDomain
 {
     return [self getUserSettingString:STUN_SERVER_DOMAIN];
 }
+-(void)setEnableStun:(bool)enable
+{
+    [self setUserSettingBool:ENABLE_STUN withValue:enable];
+}
+-(void)setEnableICE:(bool)enable
+{
+    [self setUserSettingBool:ENABLE_ICE withValue:enable];
+}
+-(void)setEnableIPV6:(bool)enable
+{
+    [self setUserSettingBool:USE_IPV6 withValue:enable];
+}
+
+-(void)setCardDavServerPath:(NSString*)serverPath
+{
+    [self setUserSettingString:CARDDAV_SERVER_PATH withValue:serverPath];
+}
+
+-(NSString*)getCardDavServerPath
+{
+    return [self getUserSettingString:CARDDAV_SERVER_PATH];
+}
+
+-(void)setCardDavRealmName:(NSString*)realmName
+{
+    [self setUserSettingString:CARDDAV_REALM_NAME withValue:realmName];
+}
+
+-(NSString*)getCardDavRealmName
+{
+    return [self getUserSettingString:CARDDAV_REALM_NAME];
+}
+
 //==========================================================================================
 // Accessors
 #pragma mark settings accessors
@@ -520,6 +549,7 @@
 
 -(void)setRtcpFbMode:(NSString*) rtcpFbMode{
     [self setUserSettingString:RTCP_FB_MODE withValue:rtcpFbMode];
+    [[LinphoneManager instance] updateRTCPFeedbackMode];
 }
 -(NSString*)getRtcpFbMode{
     return [self getUserSettingString:RTCP_FB_MODE];
@@ -566,10 +596,6 @@
 -(NSString*) getVideoPreset
 {
     return [self getAppSettingString:VIDEO_PRESET];
-}
--(NSString*) getStunServerDomain
-{
-    return [self getAppSettingString:STUN_SERVER_DOMAIN];
 }
 
 -(NSString*) getUITransportString
